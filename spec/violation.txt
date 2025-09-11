@@ -1,0 +1,7 @@
+- id: SC001
+- resource: (e.g., PersistentVolumeClaim/mydata)
+- path: /spec/storageClassName
+- found: local-path
+- expected: managed-csi
+- severity: error
+- rule: storageClass.k3s_to_aks

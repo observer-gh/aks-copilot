@@ -1,0 +1,5 @@
+Function: inspect_storageclass(manifest_yaml: str) -> list[dict]
+Input: a single Kubernetes YAML string
+Output: a list of violation dicts (empty list if none)
+Emits SC001 when a PVC has spec.storageClassName == "local-path"
+Violation shape: {id, resource, path, found, expected, severity, rule}

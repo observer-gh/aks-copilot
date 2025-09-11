@@ -1,0 +1,9 @@
+Command: copilot fix <folder>
+Behavior:
+- read all *.yaml under <folder>
+- run inspect_storageclass on each file
+- aggregate violations
+- if any SC001 found:
+    - write report.md (append entries)
+    - write patch.json (JSON Patch array for each PVC to replace storageClassName to managed-csi)
+Exit code: always 0 (MVP)

@@ -1,0 +1,26 @@
+Test Suite: inspect_storageclass
+
+Case 1: PVC with local-path (should emit SC001)
+Input file: tests/fixtures/statefulset_bad.yaml
+Expected violations (1):
+- id: SC001
+  resource: PersistentVolumeClaim/mydata
+  path: /spec/storageClassName
+  found: local-path
+  expected: managed-csi
+  severity: error
+  rule: storageClass.k3s_to_aks
+
+Case 2: PVC with managed-csi (should emit none)
+Input snippet:
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: ok
+spec:
+  accessModes: ["ReadWriteOnce"]
+  resources:
+    requests:
+      storage: 1Gi
+  storageClassName: managed-csi
+Expected violations: []

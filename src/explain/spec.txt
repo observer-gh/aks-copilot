@@ -1,0 +1,3 @@
+Function: load_explanation(rule_id: str) -> dict
+Returns: { "why": str, "source": str }
+Source: reads from rules/index.json + corresponding markdown
