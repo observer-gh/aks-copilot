@@ -17,9 +17,16 @@
   Severity: error
   Patch: manual (no auto-fix)
   LLM suggestion (preview only):
+    ---
     spec:
       ingress:
-        class: azure/application-gateway
+        className: azure/application-gateway
+      annotations:
+        kubernetes.io/ingress.class: azure/application-gateway
+    ---
+      ingress:
+        annotation: 
+          kubernetes.io/ingress.class: azure/application-gateway
   Why: # Ingress on AKS (AGIC Basics)
   Source: kb/ingress_agic.md
 
@@ -33,7 +40,7 @@
     spec:
       ingress:
         annotations:
-          azure.loadbalancer.networking.azure.com/ingressClass: "azure/application-gateway"
+          kubernetes.io/ingress.class: "azure/application-gateway"
   Why: # Ingress on AKS (AGIC Basics)
   Source: kb/ingress_agic.md
 
@@ -43,6 +50,7 @@
   Expected: managed-csi
   Severity: error
   Patch: auto (JSON Patch prepared)
+  Note: chose 'managed-csi' (live classes: azurefile, azurefile-csi, azurefile-csi-premium, azurefile-premium, default, managed, managed-csi, managed-csi-premium, managed-premium)
   Why: # AKS Storage Classes (Managed CSI)
   Source: kb/aks_storage.md
 

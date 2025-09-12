@@ -2,7 +2,7 @@ from src.explain.loader import load_explanation
 from src.patch.llm.suggest_sc003 import suggest_sc003_preview
 
 
-def format_violations(violations):
+def format_violations(violations, live_info=None):
     lines = []
     for v in violations:
         lines.append(f"**File:** {v.get('file', '<input>')}")
@@ -13,6 +13,13 @@ def format_violations(violations):
         mode = v.get("patch", "manual")
         if mode == "auto":
             lines.append("  Patch: auto (JSON Patch prepared)")
+            # Add live StorageClass info for SC001
+            if v["id"] == "SC001" and live_info:
+                chosen_sc, live_set = live_info
+                live_classes_str = ', '.join(
+                    sorted(live_set)) if live_set else 'n/a'
+                lines.append(
+                    f"  Note: chose '{chosen_sc}' (live classes: {live_classes_str})")
         else:
             lines.append("  Patch: manual (no auto-fix)")
 

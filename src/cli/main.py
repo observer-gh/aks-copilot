@@ -87,7 +87,7 @@ def fix(filepath: pathlib.Path):
 
     # write patch.json: SC001 ops (deterministic) + SC002 ops (LLM if valid)
     sc001_ops = build_patches([v for v in violations if v.get(
-        "patch") == "auto" and v["id"] == "SC001"])
+        "patch") == "auto" and v["id"] == "SC001"], use_live=False)
     patch_ops = sc001_ops + extra_ops
 
     # before writing patch.json, dry-run guard
@@ -106,7 +106,7 @@ def fix(filepath: pathlib.Path):
 
 
 @app.command("fix-folder")
-def fix_folder(dirpath: pathlib.Path):
+def fix_folder(dirpath: pathlib.Path, live: bool = typer.Option(False, "--live", help="Probe cluster for StorageClasses")):
     """
     Read all *.yml|*.yaml under <dir> (non-recursive), aggregate violations,
     write report.md + patch.json.
@@ -171,13 +171,22 @@ def fix_folder(dirpath: pathlib.Path):
     if not all_violations:
         lines += ["", "- None"]
     else:
-        lines += format_violations(all_violations)
+        # Get live StorageClass info if using --live flag
+        live_info = None
+        if live:
+            from src.patch.generator import sc001_patch_ops
+            try:
+                _, chosen_sc, live_set = sc001_patch_ops("", use_live=True)
+                live_info = (chosen_sc, live_set)
+            except Exception:
+                pass  # fallback gracefully
+        lines += format_violations(all_violations, live_info)
 
     report_path.write_text("\n".join(lines), encoding="utf-8")
 
     # write patch.json: SC001 ops (deterministic) + SC002 ops (LLM if valid)
     sc001_ops = build_patches([v for v in all_violations if v.get(
-        "patch") == "auto" and v["id"] == "SC001"])
+        "patch") == "auto" and v["id"] == "SC001"], use_live=live)
     combined_ops = sc001_ops + extra_ops
 
     # dry-run against a synthetic YAML = concatenation of all files' texts

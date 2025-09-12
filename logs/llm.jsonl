@@ -2,3 +2,7 @@
 {"file": "examples/enemy/ing.yml", "rule": "SC003", "stage": "llm_suggest", "ok": true, "raw": "spec:\n  ingress:\n    class: azure/application-gateway"}
 {"file": "examples/enemy/ingress_bad.yml", "rule": "SC003", "stage": "llm_suggest", "ok": true, "raw": "```\nspec:\n  ingress:\n    annotations:\n      azure.loadbalancer.networking.azure.com/ingressClass: \"azure/application-gateway\"\n```"}
 {"file": "folder", "rule": "ALL", "stage": "dryrun", "ok": true, "reason": ""}
+{"file": "examples/enemy/deploy.yml", "rule": "SC002", "stage": "llm", "ok": true, "ops": 1}
+{"file": "examples/enemy/ing.yml", "rule": "SC003", "stage": "llm_suggest", "ok": true, "raw": "---\nspec:\n  ingress:\n    className: azure/application-gateway\n  annotations:\n    kubernetes.io/ingress.class: azure/application-gateway\n---\n  ingress:\n    annotation: \n      kubernetes.io/ingress.class: azure/application-gateway"}
+{"file": "examples/enemy/ingress_bad.yml", "rule": "SC003", "stage": "llm_suggest", "ok": true, "raw": "```\nspec:\n  ingress:\n    annotations:\n      kubernetes.io/ingress.class: \"azure/application-gateway\"\n```"}
+{"file": "folder", "rule": "ALL", "stage": "dryrun", "ok": true, "reason": ""}
