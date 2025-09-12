@@ -92,28 +92,6 @@ Streamlit UI (bonus, Day 3 if time)
 
 ⸻
 
-7. Build Schedule (3 Days)
-
-Day 1
-• Implement storageClass rule end-to-end (inspect → explain → patch → CLI).
-• Build report/patch output structure.
-• Seed RAG KB with 2 golden docs.
-
-Day 2
-• Add remaining 5 rules.
-• Deterministic patches for simple cases.
-• LLM patch suggest + validation pipeline.
-• Expand RAG KB to all rules.
-
-Day 3
-• Mock apply + healthcheck.
-• Wire CLI end-to-end.
-• Streamlit UI (time permitting).
-• Dockerize → push to ACR.
-• Prepare demo runbook (upload manifests → violations → patch → apply → health).
-
-⸻
-
 8. Testing Strategy
    • Unit tests: one fixture per rule → assert correct violation detected.
    • Patch golden set: 10–15 manifests → compare patch structure.

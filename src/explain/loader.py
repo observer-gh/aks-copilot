@@ -24,6 +24,7 @@ def _get_retriever():
 QUERIES = {
     "SC001": "AKS storage class managed CSI vs local-path why",
     "SC002": "kubernetes why set container requests limits QoS HPA",
+    "SC003": "AKS ingress AGIC why ingressClassName or annotation needed"
 }
 
 

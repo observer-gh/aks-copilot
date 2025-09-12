@@ -2,6 +2,7 @@
 from src.patch.llm.runner import suggest_sc002_ops
 from src.patch.dryrun import dry_run_apply
 from src.config import get_config
+from src.llm.logger import log_llm
 import json
 import os
 import pathlib
@@ -9,18 +10,13 @@ import typer
 from src.inspect.storageclass import inspect_storageclass
 from src.explain.loader import load_explanation
 from src.inspect.requests_limits import inspect_requests_limits
+from src.inspect.ingress import inspect_ingress_class
 from src.report.writer import format_violations
 from src.patch.validator import path_exists_in_yaml
 from src.patch.generator import build_patches
 from src.report.writer import format_violations
 
 from src.patch.generator import build_patches
-
-
-def _log_llm(event: dict):
-    os.makedirs("logs", exist_ok=True)
-    with open("logs/llm.jsonl", "a", encoding="utf-8") as f:
-        f.write(json.dumps(event, ensure_ascii=False) + "\n")
 
 
 app = typer.Typer(help="k3s→AKS Copilot (MVP)")
@@ -41,6 +37,7 @@ def fix(filepath: pathlib.Path):
     violations = []
     violations += inspect_storageclass(text)
     violations += inspect_requests_limits(text)
+    violations += inspect_ingress_class(text)
 
     # set manual or auto patch mode
     for v in violations:
@@ -68,11 +65,11 @@ def fix(filepath: pathlib.Path):
         if ops:
             v["patch"] = "auto"
             extra_ops.extend(ops)
-            _log_llm({"file": str(filepath), "rule": "SC002",
+            log_llm({"file": str(filepath), "rule": "SC002",
                      "stage": "llm", "ok": True, "ops": len(ops)})
         else:
             v["patch"] = "manual"  # keep manual if validator rejected
-            _log_llm({"file": str(filepath), "rule": "SC002",
+            log_llm({"file": str(filepath), "rule": "SC002",
                      "stage": "llm", "ok": False, "reason": reason})
 
     # Always write files (MVP)
@@ -95,7 +92,7 @@ def fix(filepath: pathlib.Path):
 
     # before writing patch.json, dry-run guard
     ok, reason = dry_run_apply(text, patch_ops)
-    _log_llm({"file": str(filepath), "rule": "ALL", "stage": "dryrun",
+    log_llm({"file": str(filepath), "rule": "ALL", "stage": "dryrun",
              "ok": ok, "reason": ("" if ok else reason)})
     if not ok:
         # if any op would fail, downgrade SC002 to manual and drop its ops
@@ -130,6 +127,7 @@ def fix_folder(dirpath: pathlib.Path):
         text = f.read_text(encoding="utf-8")
         vs = inspect_storageclass(text)
         vs += inspect_requests_limits(text)
+        vs += inspect_ingress_class(text)
 
         # before aggregating:
         for v in vs:
@@ -157,11 +155,11 @@ def fix_folder(dirpath: pathlib.Path):
             if ops:
                 v["patch"] = "auto"
                 file_extra_ops.extend(ops)
-                _log_llm({"file": str(f), "rule": "SC002",
+                log_llm({"file": str(f), "rule": "SC002",
                          "stage": "llm", "ok": True, "ops": len(ops)})
             else:
                 v["patch"] = "manual"
-                _log_llm({"file": str(f), "rule": "SC002",
+                log_llm({"file": str(f), "rule": "SC002",
                          "stage": "llm", "ok": False, "reason": reason})
 
         # accumulate to global
@@ -188,7 +186,7 @@ def fix_folder(dirpath: pathlib.Path):
         folder_text += f.read_text(encoding="utf-8") + "\n---\n"
 
     ok, reason = dry_run_apply(folder_text, combined_ops)
-    _log_llm({"file": "folder", "rule": "ALL", "stage": "dryrun",
+    log_llm({"file": "folder", "rule": "ALL", "stage": "dryrun",
              "ok": ok, "reason": ("" if ok else reason)})
     if not ok:
         # drop LLM-generated adds (SC002) on failure; keep safe SC001 replaces
@@ -226,6 +224,7 @@ def fix_tree(dirpath: pathlib.Path):
             continue
         vs = inspect_storageclass(text)
         vs += inspect_requests_limits(text)
+        vs += inspect_ingress_class(text)
         for v in vs:
             vv = dict(v)
             vv["file"] = str(f)
@@ -269,6 +268,7 @@ def fix_per_file(dirpath: pathlib.Path):
         text = f.read_text(encoding="utf-8")
         violations = inspect_storageclass(text)
         violations += inspect_requests_limits(text)
+        violations += inspect_ingress_class(text)
         base = f.stem  # filename without extension
         report_path = f.with_name(f"report_{base}.md")
         patch_path = f.with_name(f"patch_{base}.json")
@@ -305,6 +305,7 @@ def validate(filepath: pathlib.Path):
     text = filepath.read_text(encoding="utf-8")
     violations = inspect_storageclass(text)
     violations += inspect_requests_limits(text)
+    violations += inspect_ingress_class(text)
 
     if not violations:
         typer.echo("No violations.")

@@ -13,6 +13,8 @@ echo
 echo "== 1) Validate (quick spot check) =="
 python -m src.cli.main validate "$DIR/pvc.yml" || true
 python -m src.cli.main validate "$DIR/deploy.yml" || true
+python -m src.cli.main validate "$DIR/ing.yml" || true
+
 
 echo
 echo "== 2) Fix (folder, full flow: Inspect → Explain → Patch[LLM+guards]) =="

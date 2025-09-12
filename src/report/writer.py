@@ -1,4 +1,5 @@
 from src.explain.loader import load_explanation
+from src.patch.llm.suggest_sc003 import suggest_sc003_preview
 
 
 def format_violations(violations):
@@ -14,6 +15,17 @@ def format_violations(violations):
             lines.append("  Patch: auto (JSON Patch prepared)")
         else:
             lines.append("  Patch: manual (no auto-fix)")
+
+        # SC003 LLM suggestion (preview only)
+        if v["id"] == "SC003":
+            preview = suggest_sc003_preview(
+                v.get("file", "<input>"), kind="Ingress", path=v["path"])
+            if preview:
+                lines.append("  LLM suggestion (preview only):")
+                # indent multi-line YAML for readability
+                for ln in preview.splitlines():
+                    lines.append(f"    {ln}")
+
         exp = load_explanation(v["id"])
         if exp.get("why"):
             lines.append(f"  Why: {exp['why']}")
