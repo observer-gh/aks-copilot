@@ -64,7 +64,7 @@ def fix(filepath: pathlib.Path):
         # kind heuristic (good enough for MVP)
         kind = "Deployment" if "/spec/template/spec/" in container_path else "Pod"
 
-        ops, reason = suggest_sc002_ops(kind, idx, text)
+        ops, reason = suggest_sc002_ops(kind, idx, text, str(filepath))
         if ops:
             v["patch"] = "auto"
             extra_ops.extend(ops)
@@ -153,7 +153,7 @@ def fix_folder(dirpath: pathlib.Path):
                 idx = 0
             kind = "Deployment" if "/spec/template/spec/" in container_path else "Pod"
 
-            ops, reason = suggest_sc002_ops(kind, idx, text)
+            ops, reason = suggest_sc002_ops(kind, idx, text, str(f))
             if ops:
                 v["patch"] = "auto"
                 file_extra_ops.extend(ops)
@@ -355,7 +355,7 @@ def llm_suggest(filepath: pathlib.Path, kind: str = "Deployment", index: int = 0
         typer.echo(f"[ERR] file not found: {filepath}", err=True)
         raise typer.Exit(code=1)
     text = filepath.read_text(encoding="utf-8")
-    ops, reason = suggest_sc002_ops(kind, index, text)
+    ops, reason = suggest_sc002_ops(kind, index, text, str(filepath))
     if ops:
         typer.echo("🤖 LLM suggested patch:")
         typer.echo(json.dumps(ops, indent=2))
