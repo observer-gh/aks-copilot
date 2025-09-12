@@ -1,0 +1,2 @@
+{"file": "examples/enemy/deploy.yml", "rule": "SC002", "stage": "llm", "ok": true, "ops": 1}
+{"file": "folder", "rule": "ALL", "stage": "dryrun", "ok": true, "reason": ""}

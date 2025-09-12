@@ -1,0 +1,25 @@
+SYSTEM:
+You are a Kubernetes expert. Return ONLY a JSON array of JSON Patch ops. No prose.
+
+TASK:
+Rule: SC002 (add resources.requests and limits to a container)
+Input kind: {{KIND}}            # Pod | Deployment | StatefulSet
+Container index path: {{PATH}}  # e.g. /spec/template/spec/containers/0 or /spec/containers/0
+Current container snippet:
+{{SNIPPET}}
+
+CONSTRAINTS:
+- Allowed ops: "add" only.
+- Target path: "{{PATH}}/resources"
+- Value must include BOTH:
+  requests: { cpu: "100m", memory: "128Mi" }
+  limits:   { cpu: "200m", memory: "256Mi" }
+- Do NOT modify image/env/volumes/ports/securityContext.
+- Max 1 op per container.
+
+OUTPUT:
+[
+  { "op": "add", "path": "{{PATH}}/resources",
+    "value": { "requests": {"cpu":"100m","memory":"128Mi"},
+               "limits":   {"cpu":"200m","memory":"256Mi"} } }
+]

@@ -1,5 +1,9 @@
 # src/cli/main.py
+from src.patch.llm.runner import suggest_sc002_ops
+from src.patch.dryrun import dry_run_apply
+from src.config import get_config
 import json
+import os
 import pathlib
 import typer
 from src.inspect.storageclass import inspect_storageclass
@@ -11,6 +15,13 @@ from src.patch.generator import build_patches
 from src.report.writer import format_violations
 
 from src.patch.generator import build_patches
+
+
+def _log_llm(event: dict):
+    os.makedirs("logs", exist_ok=True)
+    with open("logs/llm.jsonl", "a", encoding="utf-8") as f:
+        f.write(json.dumps(event, ensure_ascii=False) + "\n")
+
 
 app = typer.Typer(help="k3s→AKS Copilot (MVP)")
 
@@ -37,6 +48,33 @@ def fix(filepath: pathlib.Path):
         if v.get("id") == "SC001" and path_exists_in_yaml(text, v["path"]):
             v["patch"] = "auto"
 
+    # try LLM lane for SC002 (per container)
+    extra_ops = []
+    for v in violations:
+        if v.get("id") != "SC002":
+            continue
+        # infer container_path and kind
+        path = v["path"]  # e.g. /spec/template/spec/containers/0/resources
+        container_path = path.rsplit("/resources", 1)[0]
+        # container index
+        try:
+            idx = int(container_path.split("/containers/")[1].split("/")[0])
+        except Exception:
+            idx = 0
+        # kind heuristic (good enough for MVP)
+        kind = "Deployment" if "/spec/template/spec/" in container_path else "Pod"
+
+        ops, reason = suggest_sc002_ops(kind, idx, text)
+        if ops:
+            v["patch"] = "auto"
+            extra_ops.extend(ops)
+            _log_llm({"file": str(filepath), "rule": "SC002",
+                     "stage": "llm", "ok": True, "ops": len(ops)})
+        else:
+            v["patch"] = "manual"  # keep manual if validator rejected
+            _log_llm({"file": str(filepath), "rule": "SC002",
+                     "stage": "llm", "ok": False, "reason": reason})
+
     # Always write files (MVP)
     report_path = pathlib.Path("report.md")
     patch_path = pathlib.Path("patch.json")
@@ -50,8 +88,19 @@ def fix(filepath: pathlib.Path):
         lines += format_violations(violations)
     report_path.write_text("\n".join(lines), encoding="utf-8")
 
-    # Build JSON Patch ops (one replace per violation)
-    patch_ops = build_patches(violations)
+    # write patch.json: SC001 ops (deterministic) + SC002 ops (LLM if valid)
+    sc001_ops = build_patches([v for v in violations if v.get(
+        "patch") == "auto" and v["id"] == "SC001"])
+    patch_ops = sc001_ops + extra_ops
+
+    # before writing patch.json, dry-run guard
+    ok, reason = dry_run_apply(text, patch_ops)
+    _log_llm({"file": str(filepath), "rule": "ALL", "stage": "dryrun",
+             "ok": ok, "reason": ("" if ok else reason)})
+    if not ok:
+        # if any op would fail, downgrade SC002 to manual and drop its ops
+        # keep SC001 deterministic ops only
+        patch_ops = [op for op in patch_ops if op.get("op") == "replace"]
 
     patch_path.write_text(json.dumps(patch_ops, indent=2), encoding="utf-8")
 
@@ -74,16 +123,49 @@ def fix_folder(dirpath: pathlib.Path):
         typer.echo("[WARN] no *.yml|*.yaml found")
         raise typer.Exit(code=0)
 
+    extra_ops = []
     all_violations = []
+
     for f in files:
         text = f.read_text(encoding="utf-8")
         vs = inspect_storageclass(text)
         vs += inspect_requests_limits(text)
-        # tag each violation with filename for report readability
+
+        # before aggregating:
         for v in vs:
             v = dict(v)
             v["file"] = str(f)
+            v["patch"] = "manual"
+            # SC001 auto if path exists
+            if v.get("id") == "SC001" and path_exists_in_yaml(text, v["path"]):
+                v["patch"] = "auto"
             all_violations.append(v)
+
+        # after the above loop, add SC002 LLM lane for this file
+        file_extra_ops = []
+        for v in [vv for vv in all_violations if vv.get("file") == str(f) and vv["id"] == "SC002"]:
+            # infer kind/index from path
+            container_path = v["path"].rsplit("/resources", 1)[0]
+            try:
+                idx = int(container_path.split(
+                    "/containers/")[1].split("/")[0])
+            except Exception:
+                idx = 0
+            kind = "Deployment" if "/spec/template/spec/" in container_path else "Pod"
+
+            ops, reason = suggest_sc002_ops(kind, idx, text)
+            if ops:
+                v["patch"] = "auto"
+                file_extra_ops.extend(ops)
+                _log_llm({"file": str(f), "rule": "SC002",
+                         "stage": "llm", "ok": True, "ops": len(ops)})
+            else:
+                v["patch"] = "manual"
+                _log_llm({"file": str(f), "rule": "SC002",
+                         "stage": "llm", "ok": False, "reason": reason})
+
+        # accumulate to global
+        extra_ops.extend(file_extra_ops)
 
     # write report.md
     report_path = pathlib.Path("report.md")
@@ -95,10 +177,25 @@ def fix_folder(dirpath: pathlib.Path):
 
     report_path.write_text("\n".join(lines), encoding="utf-8")
 
-    # write patch.json (one op per violation)
-    patch_ops = build_patches(all_violations)
+    # write patch.json: SC001 ops (deterministic) + SC002 ops (LLM if valid)
+    sc001_ops = build_patches([v for v in all_violations if v.get(
+        "patch") == "auto" and v["id"] == "SC001"])
+    combined_ops = sc001_ops + extra_ops
+
+    # dry-run against a synthetic YAML = concatenation of all files' texts
+    folder_text = ""
+    for f in files:
+        folder_text += f.read_text(encoding="utf-8") + "\n---\n"
+
+    ok, reason = dry_run_apply(folder_text, combined_ops)
+    _log_llm({"file": "folder", "rule": "ALL", "stage": "dryrun",
+             "ok": ok, "reason": ("" if ok else reason)})
+    if not ok:
+        # drop LLM-generated adds (SC002) on failure; keep safe SC001 replaces
+        combined_ops = sc001_ops
+
     pathlib.Path("patch.json").write_text(
-        json.dumps(patch_ops, indent=2), encoding="utf-8")
+        json.dumps(combined_ops, indent=2), encoding="utf-8")
 
     typer.echo(
         f"Wrote {report_path} and patch.json ({len(all_violations)} violations across {len(files)} files).")
@@ -247,6 +344,31 @@ def health(namespace: str = "default"):
     typer.echo(f"# Health (namespace={namespace})")
     typer.echo("Pods Ready: 3/3 (mock)")
     typer.echo("Recent Events: none (mock)")
+
+
+@app.command("llm-suggest")
+def llm_suggest(filepath: pathlib.Path, kind: str = "Deployment", index: int = 0):
+    """
+    Stub: produce SC002 JSON Patch for one container and validate it.
+    """
+    if not filepath.exists():
+        typer.echo(f"[ERR] file not found: {filepath}", err=True)
+        raise typer.Exit(code=1)
+    text = filepath.read_text(encoding="utf-8")
+    ops, reason = suggest_sc002_ops(kind, index, text)
+    if ops:
+        typer.echo("🤖 LLM suggested patch:")
+        typer.echo(json.dumps(ops, indent=2))
+        raise typer.Exit(code=0)
+    typer.echo(f"[MANUAL] no valid auto-patch: {reason}")
+
+
+@app.command("show-config")
+def show_config():
+    import json as _json
+    from pprint import pprint
+    cfg = get_config()
+    typer.echo(_json.dumps(cfg, indent=2, ensure_ascii=False))
 
 
 if __name__ == "__main__":

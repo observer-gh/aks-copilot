@@ -1,0 +1,8 @@
+{
+  "defaultSC": "managed-csi",
+  "sc002": { "cpu_requests": "100m", "mem_requests": "128Mi", "cpu_limits": "200m", "mem_limits": "256Mi" },
+  "llm": "stub",
+  "embedder": "ollama",
+
+  "embedder_model": "mxbai-embed-large:latest"
+}

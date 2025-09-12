@@ -1,0 +1,9 @@
+Function: validate_sc002_ops(ops: list, container_path: str, yaml_text: str) -> tuple[bool, str]
+Checks:
+1) ops is JSON array; each has op/path/value
+2) op == "add"; path == f"{container_path}/resources"
+3) value has requests.cpu, requests.memory, limits.cpu, limits.memory
+4) base path exists in yaml_text (container_path points to a container)
+5) will not overwrite existing requests/limits
+6) defaults within bounds (cpu<=1, mem<=1Gi)
+Return: (True, "") if OK; else (False, "reason")
