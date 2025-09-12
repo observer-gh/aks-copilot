@@ -1,11 +1,14 @@
 # Migration Copilot Report
 
 **Violations Found**
-
-- ID: SC001
-  Resource: PersistentVolumeClaim/mydata
-  Path: /spec/storageClassName
+**File:** <input>
+- SC001 PersistentVolumeClaim/mydata /spec/storageClassName
   Found: local-path
   Expected: managed-csi
   Severity: error
-  Why: k3s local-path is single-node only; AKS requires managed CSI storage for reliability.
+  Patch: auto (JSON Patch prepared)
+  Why: k3s local-path is single-node only; AKS requires managed CSI.
+  Source: https://learn.microsoft.com/en-us/azure/aks/concepts-storage
+
+
+Total violations: 1
