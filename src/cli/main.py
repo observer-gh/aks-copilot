@@ -430,3 +430,122 @@ def patch_command(violations: pathlib.Path, out: pathlib.Path = pathlib.Path("pa
 
 if __name__ == "__main__":
     app()
+
+
+# --- Story 2.2 additions ---
+@app.command("suggest")
+def suggest_command(violations: pathlib.Path, out: pathlib.Path = pathlib.Path("suggestions.json"), rule: str = "SC003"):
+    """Generate patch suggestions (rule-filtered) using LLM + heuristic fallback (SC003) and write schema-wrapped file."""
+    if not violations.exists():
+        typer.echo(f"[ERR] violations file not found: {violations}", err=True)
+        raise typer.Exit(code=1)
+    import json as _json
+    from src.llm.augment import generate_resource_suggestions
+    from src.patch.validator import validate_patch_ops
+    from src.patch.suggestions import write_suggestions
+    try:
+        vlist = _json.loads(violations.read_text(encoding="utf-8"))
+    except Exception as e:
+        typer.echo(f"[ERR] cannot parse violations: {e}", err=True)
+        raise typer.Exit(code=1)
+    if not isinstance(vlist, list):
+        typer.echo("[ERR] violations file must be a JSON array", err=True)
+        raise typer.Exit(code=1)
+    raw = generate_resource_suggestions(vlist, rule_filter=rule)
+    suggestions = []
+    for idx, r in enumerate(raw):
+        ops = r.get("ops", [])
+        ok, reason = validate_patch_ops(ops)
+        suggestions.append({
+            "index": idx,
+            "rule_id": r.get("rule_id"),
+            "file": r.get("file"),
+            "resource": {"kind": r.get("kind"), "name": r.get("name")},
+            "ops": ops,
+            "explanation": r.get("explanation", ""),
+            "valid": ok,
+            "reason": ("" if ok else reason),
+            "rejected": False,
+        })
+        log_llm({"event": "suggest.store", "index": idx,
+                "rule": r.get("rule_id"), "valid": ok})
+    write_suggestions(suggestions, str(out), rule=rule)
+    typer.echo(
+        f"Wrote {out} ({len(suggestions)} suggestions, {sum(1 for s in suggestions if s['valid'])} valid)")
+
+
+@app.command("merge-suggestions")
+def merge_suggestions_cmd(
+    suggestions_file: pathlib.Path = typer.Argument(pathlib.Path(
+        "suggestions.json"), help="Path to suggestions.json produced by 'suggest' command"),
+    approve: str = typer.Option(
+        None, "--approve", help="Comma-separated indices to approve"),
+    patch: pathlib.Path = typer.Option(pathlib.Path(
+        "patch.json"), "--patch", help="Existing patch.json to merge into (created if missing)"),
+    verbose: bool = typer.Option(
+        False, "--verbose", help="Print per-conflict detailed information")
+):
+    """Merge approved suggestions into patch.json (creates or updates)."""
+    import json as _json
+    from src.patch.suggestions import load_suggestions, filter_approved, merge_suggestions_into_patch
+    from src.llm.logger import log_llm
+
+    if not suggestions_file.exists():
+        typer.echo(
+            f"[ERR] suggestions file not found: {suggestions_file}", err=True)
+        raise typer.Exit(code=1)
+    suggestions = load_suggestions(str(suggestions_file))
+    # parse approvals
+    approved_indices = None
+    if approve:
+        try:
+            approved_indices = [int(x.strip())
+                                for x in approve.split(',') if x.strip()]
+        except ValueError:
+            typer.echo(
+                "[ERR] invalid --approve list (must be integers)", err=True)
+            raise typer.Exit(code=1)
+    approved = filter_approved(suggestions, approved_indices)
+    invalid_requested = 0
+    if approved_indices is not None:
+        # indices user asked for that are either missing or invalid
+        valid_indices = {s.get("index") for s in suggestions if s.get("valid")}
+        for idx in approved_indices:
+            if idx not in valid_indices:
+                invalid_requested += 1
+    # load existing patch if present
+    existing = []
+    if patch.exists():
+        try:
+            existing = _json.loads(patch.read_text(encoding="utf-8"))
+            if not isinstance(existing, list):
+                existing = []
+        except Exception:
+            existing = []
+
+    if not approve:
+        typer.echo(
+            "No specific suggestions approved; auto-approving all valid suggestions.",
+            err=True,
+        )
+
+    merged_patch, summary = merge_suggestions_into_patch(
+        existing_patch=existing, suggestions=approved, collect_details=verbose)
+
+    patch.write_text(_json.dumps(merged_patch, indent=2), encoding="utf-8")
+    typer.echo(
+        f"Merged suggestions: merged={summary['merged']} duplicates={summary['skipped_duplicates']} conflicts={summary['conflicts']} invalid_requested={invalid_requested}")
+    if verbose and summary.get("conflicts"):
+        # emit conflict details lines
+        for d in summary.get("conflict_details", []):
+            prev_v = _json.dumps(d.get("previous")) if d.get(
+                "previous") is not None else "null"
+            new_v = _json.dumps(d.get("new")) if d.get(
+                "new") is not None else "null"
+            typer.echo(
+                f"CONFLICT file={d.get('file')} path={d.get('path')} previous={prev_v} new={new_v}")
+    log_llm({"event": "merge.summary.final", **summary,
+            "invalid_requested": invalid_requested})
+    exit_code = 0 if (summary['conflicts'] ==
+                      0 and invalid_requested == 0) else 2
+    raise typer.Exit(code=exit_code)
