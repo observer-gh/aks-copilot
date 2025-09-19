@@ -115,3 +115,38 @@ def dry_run_apply(yaml_text: str, ops: List[dict]) -> Tuple[bool, str]:
         if not applied:
             return False, f"dry-run failed: {last_reason}"
     return True, ""
+
+
+def dry_run_validate(patches: List[dict], manifests_root: str = None, strict: bool = False) -> List[dict]:
+    """
+    Validate a list of patch envelopes (as produced by build_patch_ops).
+    For each envelope attempt to load the referenced file and run dry_run_apply.
+    Returns list of results: {file, resource, success, details}
+    """
+    results = []
+    from pathlib import Path
+
+    for p in patches:
+        file = p.get("file")
+        resource = p.get("resource")
+        ops = p.get("ops", [])
+        # locate file
+        if manifests_root:
+            fpath = Path(manifests_root) / file
+        else:
+            fpath = Path(file)
+        if not fpath.exists():
+            res = {"file": str(fpath), "resource": resource,
+                   "success": False, "details": "file not found"}
+            results.append(res)
+            if strict:
+                raise FileNotFoundError(str(fpath))
+            continue
+        text = fpath.read_text(encoding="utf-8")
+        ok, reason = dry_run_apply(text, ops)
+        res = {"file": str(fpath), "resource": resource,
+               "success": ok, "details": reason}
+        results.append(res)
+        if strict and not ok:
+            raise RuntimeError(f"dry-run failed for {fpath}: {reason}")
+    return results

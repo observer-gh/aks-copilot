@@ -56,3 +56,48 @@ def build_patches(violations: List[Dict], use_live: bool = False) -> List[Dict]:
                 ops.append({"op": "replace", "path": v["path"], "value": sc})
         # SC002 → manual (no auto-fix in v0)
     return ops
+
+
+def build_patch_ops(violations: List[Dict], use_live: bool = False) -> List[Dict]:
+    """
+    Adapter that returns per-file envelope list of patch ops.
+    Each envelope: {"file": str, "resource": {"kind":..., "name":...} (optional), "ops": [ ... ]}
+    Validates minimal violation shape (rule_id or id, file, path, desired)
+    """
+    if not isinstance(violations, list):
+        raise ValueError("violations must be a list of dicts")
+
+    envelopes: List[Dict] = []
+    # normalize: allow 'rule_id' or 'id'
+    for v in violations:
+        if not isinstance(v, dict):
+            raise ValueError("each violation must be a dict")
+        rule = v.get("rule_id") or v.get("id")
+        file = v.get("file")
+        path = v.get("path")
+        desired = v.get("desired")
+        if not rule or not file or not path:
+            raise ValueError(
+                "violation missing required keys: rule_id/id, file, path")
+
+        # currently only SC001 -> replace storageClassName
+        if rule in ("SC001", "sc001"):
+            if desired is None:
+                # fallback to config default
+                desired = get_config().get("defaultSC", "managed-csi")
+            op = {"op": "replace", "path": path, "value": desired}
+            env = {"file": file, "resource": {"kind": v.get(
+                "kind"), "name": v.get("name")}, "ops": [op]}
+            envelopes.append(env)
+        else:
+            # unknown rule -> skip or raise? choose to skip for now
+            continue
+    return envelopes
+
+
+def write_patch_json(patches: List[Dict], out_path: str):
+    import json
+    from pathlib import Path
+
+    p = Path(out_path)
+    p.write_text(json.dumps(patches, indent=2), encoding="utf-8")

@@ -385,5 +385,45 @@ def show_config():
     typer.echo(_json.dumps(cfg, indent=2, ensure_ascii=False))
 
 
+@app.command("patch")
+def patch_command(violations: pathlib.Path, out: pathlib.Path = pathlib.Path("patch.json"), dry_run: bool = False, strict: bool = False):
+    """
+    Generate patch.json from a violations JSON file. Optionally run a dry-run validation against manifests.
+    """
+    if not violations.exists():
+        typer.echo(f"[ERR] violations file not found: {violations}", err=True)
+        raise typer.Exit(code=1)
+
+    import json as _json
+    from src.patch.generator import build_patch_ops, write_patch_json
+    from src.patch.dryrun import dry_run_validate
+
+    try:
+        v = _json.loads(violations.read_text(encoding="utf-8"))
+    except Exception as e:
+        typer.echo(f"[ERR] failed to read violations file: {e}", err=True)
+        raise typer.Exit(code=1)
+
+    try:
+        patches = build_patch_ops(v)
+    except Exception as e:
+        typer.echo(f"[ERR] failed to build patches: {e}", err=True)
+        raise typer.Exit(code=1)
+
+    write_patch_json(patches, str(out))
+    typer.echo(f"Wrote patch file: {out}")
+
+    if dry_run:
+        results = dry_run_validate(patches, manifests_root="", strict=strict)
+        ok = all(r["success"] for r in results)
+        for r in results:
+            typer.echo(
+                f"- {r['file']} -> success={r['success']} details={r['details']}")
+        if not ok:
+            typer.echo("Dry-run: failures detected", err=True)
+            raise typer.Exit(code=2)
+        typer.echo("Dry-run: all patches validated")
+
+
 if __name__ == "__main__":
     app()

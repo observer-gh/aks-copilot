@@ -5,6 +5,11 @@
     "value": "managed-csi"
   },
   {
+    "op": "replace",
+    "path": "/spec/storageClassName",
+    "value": "managed-csi"
+  },
+  {
     "op": "add",
     "path": "/spec/template/spec/containers/0/resources",
     "value": {

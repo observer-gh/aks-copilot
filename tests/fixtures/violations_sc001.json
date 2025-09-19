@@ -1,0 +1,12 @@
+[
+  {
+    "rule_id": "SC001",
+    "file": "tests/fixtures/pvc_bad.yml",
+    "kind": "PersistentVolumeClaim",
+    "name": "data-myapp-0",
+    "path": "/spec/storageClassName",
+    "current": "local-path",
+    "desired": "standard",
+    "message": "storageClassName is 'local-path' which is disallowed"
+  }
+]
