@@ -414,7 +414,10 @@ def patch_command(violations: pathlib.Path, out: pathlib.Path = pathlib.Path("pa
     typer.echo(f"Wrote patch file: {out}")
 
     if dry_run:
-        results = dry_run_validate(patches, manifests_root="", strict=strict)
+        # allow caller to override manifests root via MANIFESTS_ROOT env var
+        manifests_root = os.environ.get("MANIFESTS_ROOT", "")
+        results = dry_run_validate(
+            patches, manifests_root=manifests_root, strict=strict)
         ok = all(r["success"] for r in results)
         for r in results:
             typer.echo(

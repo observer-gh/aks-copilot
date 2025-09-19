@@ -2,7 +2,7 @@ from typing import List, Dict
 import yaml
 
 
-def _scan_containers(objs, base_path) -> List[Dict]:
+def _scan_containers(objs, base_path, kind=None) -> List[Dict]:
     out = []
     for i, c in enumerate(objs or []):
         res = (c or {}).get("resources") or {}
@@ -12,14 +12,30 @@ def _scan_containers(objs, base_path) -> List[Dict]:
             res.get("limits") or {}) > 0
         if not (has_req and has_lim):
             name = (c or {}).get("name", f"idx-{i}")
+            # include desired defaults from config
+            from src.config import get_config
+            cfg = get_config()
+            sc002 = cfg.get("sc002", {})
+            desired = {
+                "requests": {"cpu": sc002.get("cpu_requests"), "memory": sc002.get("mem_requests")},
+                "limits": {"cpu": sc002.get("cpu_limits"), "memory": sc002.get("mem_limits")},
+            }
+            # normalize to the project's violation shape used by report writer
+            resource_str = f"{kind}/{name}" if kind else name
             out.append({
                 "id": "SC002",
-                "resource": f"container/{name}",
+                "rule_id": "SC002",
+                "file": None,  # caller may fill
+                "kind": kind,
+                "name": name,
+                "resource": resource_str,
                 "path": f"{base_path}/containers/{i}/resources",
-                "found": "missing requests/limits",
-                "expected": "define cpu/memory requests and limits",
+                "current": res,
+                "desired": desired,
+                "found": res,
+                "expected": desired,
                 "severity": "error",
-                "rule": "resources.requests_limits",
+                "message": "missing resource requests/limits",
             })
     return out
 
@@ -41,12 +57,12 @@ def inspect_requests_limits(manifest_yaml: str) -> List[Dict]:
         kind = doc.get("kind")
         if kind == "Pod":
             spec = (doc.get("spec") or {})
-            v += _scan_containers(spec.get("containers"), "/spec")
+            v += _scan_containers(spec.get("containers"), "/spec", kind=kind)
         elif kind in ("Deployment", "StatefulSet"):
             tpl = (((doc.get("spec") or {}).get(
                 "template") or {}).get("spec") or {})
             base = "/spec/template/spec"
-            v += _scan_containers(tpl.get("containers"), base)
+            v += _scan_containers(tpl.get("containers"), base, kind=kind)
         else:
             continue
     return v

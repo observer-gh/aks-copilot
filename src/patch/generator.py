@@ -89,6 +89,23 @@ def build_patch_ops(violations: List[Dict], use_live: bool = False) -> List[Dict
             env = {"file": file, "resource": {"kind": v.get(
                 "kind"), "name": v.get("name")}, "ops": [op]}
             envelopes.append(env)
+        elif rule in ("SC002", "sc002"):
+            # SC002: add or replace resources at the container resources path
+            desired = v.get("desired")
+            if desired is None:
+                # nothing to do
+                continue
+            # op: if current missing -> add, else replace
+            # inspector provides current -> decide
+            cur = v.get("current")
+            if not cur:
+                op = {"op": "add", "path": v["path"], "value": desired}
+            else:
+                # replace entire resources block
+                op = {"op": "replace", "path": v["path"], "value": desired}
+            env = {"file": v.get("file"), "resource": {"kind": v.get(
+                "kind"), "name": v.get("name")}, "ops": [op]}
+            envelopes.append(env)
         else:
             # unknown rule -> skip or raise? choose to skip for now
             continue
