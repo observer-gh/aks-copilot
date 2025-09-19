@@ -17,27 +17,35 @@
 | :--- | :--- | :--- | :--- |
 | 2025-09-18 | 1.0 | Initial PRD draft | John (PM) |
 
-## Requirements
+---
 
-**Functional Requirements**
+## Functional Requirements
 
-- **FR1:** The agent must analyze local Kubernetes manifest files to find configurations that are incompatible with AKS.
-- **FR2:** It must generate a `report.md` that details all violations, provides a clear explanation for why each change is necessary, and shows the patches it created.
-- **FR3:** It must generate a `resources.md` file listing the required Azure resources.
-- **FR4:** It must produce a set of patched, AKS-ready manifest files.
-- **FR5:** The user must be able to review and manually edit the generated manifests before the deployment attempt.
-- **FR6:** As part of the MVP, it must attempt a one-time deployment of the patched manifests to a target AKS namespace.
-- **FR7:** After a failed deployment, the agent must be able to analyze pod logs and events to find the root cause (Post-MVP).
-- **FR8:** The agent must be able to automatically commit patches to a Git repository to trigger a new CI/CD workflow (Post-MVP).
-- **FR9:** It must send a final success or failure notification to services like Slack.
+**FR1:** The agent must analyze local Kubernetes manifest files to find configurations that are incompatible with AKS.
 
-**Non-Functional Requirements**
+**FR2:** It must generate a `report.md` that details all violations, provides a clear explanation for why each change is necessary, and shows the patches it created.
 
-- **NFR1:** The process must be highly automated to reduce manual effort from developers.
-- **NFR2:** The agent must operate securely, fetching secrets from a cloud service like Azure Key Vault.
-- **NFR3:** The agent's actions must be strictly limited to a specific namespace; it cannot change cluster-wide configurations.
-- **NFR4:** The agent must only modify Kubernetes manifest files and is forbidden from changing application source code.
-- **NFR5:** The agent should prioritize simple, rule-based fixes for known issues before using AI for more complex problems.
+**FR3:** It must generate a `resources.md` file listing the required Azure resources.
+
+**FR4:** It must produce a set of patched, AKS-ready manifest files.
+
+**FR5:** The user must be able to review and manually edit the generated manifests before the deployment attempt.
+
+**FR6:** As part of the MVP, it must attempt a one-time deployment of the patched manifests to a target AKS namespace.
+
+---
+
+## Non-Functional Requirements
+
+**NFR1:** The process must be highly automated to reduce manual effort from developers.
+
+**NFR2:** The agent must operate securely, fetching secrets from a cloud service like Azure Key Vault.
+
+**NFR3:** The agent's actions must be strictly limited to a specific namespace; it cannot change cluster-wide configurations.
+
+**NFR4:** The agent must only modify Kubernetes manifest files and is forbidden from changing application source code.
+
+**NFR5:** The agent should prioritize simple, rule-based fixes for known issues before using AI for more complex problems.
 
 ## Technical Assumptions
 

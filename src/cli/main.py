@@ -119,6 +119,10 @@ def fix_folder(dirpath: pathlib.Path, live: bool = typer.Option(False, "--live",
     if not files:
         typer.echo("[WARN] no *.yml|*.yaml found")
         raise typer.Exit(code=0)
+    # show files found for user visibility (basic CLI behavior)
+    typer.echo(f"Found {len(files)} files:")
+    for f in files:
+        typer.echo(f"- {f.name}")
 
     extra_ops = []
     all_violations = []
