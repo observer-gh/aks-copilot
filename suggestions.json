@@ -1,0 +1,10 @@
+{
+  "schema_version": 1,
+  "generated_at": "2025-09-22T02:42:27Z",
+  "rule": "SC003",
+  "meta": {
+    "total": 0,
+    "valid": 0
+  },
+  "suggestions": []
+}

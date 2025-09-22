@@ -428,10 +428,6 @@ def patch_command(violations: pathlib.Path, out: pathlib.Path = pathlib.Path("pa
         typer.echo("Dry-run: all patches validated")
 
 
-if __name__ == "__main__":
-    app()
-
-
 # --- Story 2.2 additions ---
 @app.command("suggest")
 def suggest_command(violations: pathlib.Path, out: pathlib.Path = pathlib.Path("suggestions.json"), rule: str = "SC003"):
@@ -549,3 +545,7 @@ def merge_suggestions_cmd(
     exit_code = 0 if (summary['conflicts'] ==
                       0 and invalid_requested == 0) else 2
     raise typer.Exit(code=exit_code)
+
+
+if __name__ == "__main__":
+    app()
