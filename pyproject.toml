@@ -8,8 +8,19 @@ dependencies = [
     "faiss-cpu>=1.12.0",
     "numpy>=2.3.3",
     "pyyaml>=6.0.2",
-    "typer>=0.17.4",
+    "typer[all]>=0.17.4",
+    "openai>=1.2.3",
+    "tiktoken>=0.7.0",
+    "requests>=2.32.0",
+    "pyyaml>=6.0.1",
+    "kubernetes>=30.1.0",
 ]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.4.2",
+]
+
 
 [project.scripts]
 copilot = "src.cli.main:app"

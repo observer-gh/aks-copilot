@@ -48,12 +48,14 @@ def build_patches(violations: List[Dict], use_live: bool = False) -> List[Dict]:
     sc = cfg.get("defaultSC", "managed-csi")
     for v in violations:
         if v.get("id") == "SC001":
+            op = {"op": "replace", "path": v["path"], "value": sc, "file": v["file"]}
             if use_live:
                 sc_ops, chosen_sc, live_set = sc001_patch_ops(
                     "", use_live=True)
-                ops.extend(sc_ops)
-            else:
-                ops.append({"op": "replace", "path": v["path"], "value": sc})
+                # We are only expecting one op for SC001
+                op["value"] = sc_ops[0]["value"]
+
+            ops.append(op)
         # SC002 → manual (no auto-fix in v0)
     return ops
 

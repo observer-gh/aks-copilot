@@ -1,4 +1,5 @@
 # src/cli/main.py
+from typing import List
 from src.patch.llm.runner import suggest_sc002_ops
 from src.patch.dryrun import dry_run_apply
 from src.config import get_config
@@ -14,95 +15,131 @@ from src.inspect.ingress import inspect_ingress_class
 from src.report.writer import format_violations
 from src.patch.validator import path_exists_in_yaml
 from src.patch.generator import build_patches
-from src.report.writer import format_violations
-
-from src.patch.generator import build_patches
 
 
 app = typer.Typer(help="k3s→AKS Copilot (MVP)")
 
 
-@app.command()
-def fix(filepath: pathlib.Path):
-    """
-    Read a single YAML file and:
-    - write report.md (violations summary)
-    - write patch.json (JSON Patch ops to replace storageClassName to managed-csi)
-    """
-    if not filepath.exists():
-        typer.echo(f"[ERR] file not found: {filepath}", err=True)
-        raise typer.Exit(code=1)
-
-    text = filepath.read_text(encoding="utf-8")
-    violations = []
-    violations += inspect_storageclass(text)
-    violations += inspect_requests_limits(text)
-    violations += inspect_ingress_class(text)
-
-    # set manual or auto patch mode
-    for v in violations:
-        v["patch"] = "manual"
-        if v.get("id") == "SC001" and path_exists_in_yaml(text, v["path"]):
-            v["patch"] = "auto"
-
-    # try LLM lane for SC002 (per container)
+def _process_files(files: List[pathlib.Path], live: bool):
+    """Shared logic for file processing, validation, and patch generation."""
+    all_violations = []
     extra_ops = []
-    for v in violations:
-        if v.get("id") != "SC002":
+
+    typer.echo(f"Found {len(files)} files:")
+    for f in files:
+        typer.echo(f"- {f.name}")
+
+    file_texts = {}
+    for f in files:
+        try:
+            text = f.read_text(encoding="utf-8")
+            file_texts[str(f)] = text
+        except Exception as e:
+            typer.echo(f"[WARN] skip {f}: {e}", err=True)
             continue
-        # infer container_path and kind
-        path = v["path"]  # e.g. /spec/template/spec/containers/0/resources
-        container_path = path.rsplit("/resources", 1)[0]
-        # container index
+
+        vs = inspect_storageclass(text)
+        vs += inspect_requests_limits(text)
+        vs += inspect_ingress_class(text)
+
+        for v in vs:
+            v = dict(v)
+            v["file"] = str(f)
+            v["patch"] = "manual"
+            if v.get("id") == "SC001" and path_exists_in_yaml(text, v["path"]):
+                v["patch"] = "auto"
+            all_violations.append(v)
+
+    # LLM lane for SC002
+    for v in [vv for vv in all_violations if vv["id"] == "SC002"]:
+        filepath_str = v["file"]
+        text = file_texts.get(filepath_str)
+        if not text:
+            continue
+
+        container_path = v["path"].rsplit("/resources", 1)[0]
         try:
             idx = int(container_path.split("/containers/")[1].split("/")[0])
         except Exception:
             idx = 0
-        # kind heuristic (good enough for MVP)
         kind = "Deployment" if "/spec/template/spec/" in container_path else "Pod"
 
-        ops, reason = suggest_sc002_ops(kind, idx, text, str(filepath))
+        ops, reason = suggest_sc002_ops(kind, idx, text, filepath_str)
         if ops:
             v["patch"] = "auto"
+            # Add file info to each op for per-file dry-run
+            for op in ops:
+                op["file"] = filepath_str
             extra_ops.extend(ops)
-            log_llm({"file": str(filepath), "rule": "SC002",
+            log_llm({"file": filepath_str, "rule": "SC002",
                      "stage": "llm", "ok": True, "ops": len(ops)})
         else:
-            v["patch"] = "manual"  # keep manual if validator rejected
-            log_llm({"file": str(filepath), "rule": "SC002",
+            v["patch"] = "manual"
+            log_llm({"file": filepath_str, "rule": "SC002",
                      "stage": "llm", "ok": False, "reason": reason})
 
-    # Always write files (MVP)
+    # Report generation
     report_path = pathlib.Path("report.md")
-    patch_path = pathlib.Path("patch.json")
-
-    # Build report
     lines = ["# Migration Copilot Report", "", "**Violations Found**"]
-    if not violations:
-        lines.append("")
-        lines.append("- None")
+    if not all_violations:
+        lines += ["", "- None"]
     else:
-        lines += format_violations(violations)
+        live_info = None
+        if live:
+            from src.patch.generator import sc001_patch_ops
+            try:
+                _, chosen_sc, live_set = sc001_patch_ops("", use_live=True)
+                live_info = (chosen_sc, live_set)
+            except Exception:
+                pass
+        lines += format_violations(all_violations, live_info)
     report_path.write_text("\n".join(lines), encoding="utf-8")
 
-    # write patch.json: SC001 ops (deterministic) + SC002 ops (LLM if valid)
-    sc001_ops = build_patches([v for v in violations if v.get(
-        "patch") == "auto" and v["id"] == "SC001"], use_live=False)
-    patch_ops = sc001_ops + extra_ops
+    # Patch generation
+    sc001_ops = build_patches([v for v in all_violations if v.get(
+        "patch") == "auto" and v["id"] == "SC001"], use_live=live)
 
-    # before writing patch.json, dry-run guard
-    ok, reason = dry_run_apply(text, patch_ops)
-    log_llm({"file": str(filepath), "rule": "ALL", "stage": "dryrun",
-             "ok": ok, "reason": ("" if ok else reason)})
-    if not ok:
-        # if any op would fail, downgrade SC002 to manual and drop its ops
-        # keep SC001 deterministic ops only
-        patch_ops = [op for op in patch_ops if op.get("op") == "replace"]
+    combined_ops = sc001_ops + extra_ops
 
-    patch_path.write_text(json.dumps(patch_ops, indent=2), encoding="utf-8")
+    # Per-file dry-run
+    final_ops = []
+    for op in combined_ops:
+        filepath_str = op.get("file")
+        if not filepath_str:
+            continue
 
-    typer.echo(f"Wrote {report_path} and {patch_path}")
-    raise typer.Exit(code=0)
+        text = file_texts.get(filepath_str)
+        if not text:
+            continue
+
+        # The file path is needed for the dry run, but not in the final patch.json
+        op_copy = op.copy()
+        del op_copy["file"]
+
+        ok, reason = dry_run_apply(text, [op_copy])
+        log_llm({"file": filepath_str, "rule": "ALL", "stage": "dryrun",
+                 "ok": ok, "reason": ("" if ok else reason)})
+        if ok:
+            final_ops.append(op_copy)
+
+    pathlib.Path("patch.json").write_text(
+        json.dumps(final_ops, indent=2), encoding="utf-8")
+
+    typer.echo(
+        f"Wrote {report_path} and patch.json ({len(all_violations)} violations across {len(files)} files).")
+
+
+@app.command()
+def fix(filepath: pathlib.Path, live: bool = typer.Option(False, "--live", help="Probe cluster for StorageClasses")):
+    """
+    Read a single YAML file and:
+    - write report.md (violations summary)
+    - write patch.json (JSON Patch ops to fix violations)
+    """
+    if not filepath.exists():
+        typer.echo(f"[ERR] file not found: {filepath}", err=True)
+        raise typer.Exit(code=1)
+    _process_files([filepath], live)
 
 
 @app.command("fix-folder")
@@ -119,101 +156,11 @@ def fix_folder(dirpath: pathlib.Path, live: bool = typer.Option(False, "--live",
     if not files:
         typer.echo("[WARN] no *.yml|*.yaml found")
         raise typer.Exit(code=0)
-    # show files found for user visibility (basic CLI behavior)
-    typer.echo(f"Found {len(files)} files:")
-    for f in files:
-        typer.echo(f"- {f.name}")
-
-    extra_ops = []
-    all_violations = []
-
-    for f in files:
-        text = f.read_text(encoding="utf-8")
-        vs = inspect_storageclass(text)
-        vs += inspect_requests_limits(text)
-        vs += inspect_ingress_class(text)
-
-        # before aggregating:
-        for v in vs:
-            v = dict(v)
-            v["file"] = str(f)
-            v["patch"] = "manual"
-            # SC001 auto if path exists
-            if v.get("id") == "SC001" and path_exists_in_yaml(text, v["path"]):
-                v["patch"] = "auto"
-            all_violations.append(v)
-
-        # after the above loop, add SC002 LLM lane for this file
-        file_extra_ops = []
-        for v in [vv for vv in all_violations if vv.get("file") == str(f) and vv["id"] == "SC002"]:
-            # infer kind/index from path
-            container_path = v["path"].rsplit("/resources", 1)[0]
-            try:
-                idx = int(container_path.split(
-                    "/containers/")[1].split("/")[0])
-            except Exception:
-                idx = 0
-            kind = "Deployment" if "/spec/template/spec/" in container_path else "Pod"
-
-            ops, reason = suggest_sc002_ops(kind, idx, text, str(f))
-            if ops:
-                v["patch"] = "auto"
-                file_extra_ops.extend(ops)
-                log_llm({"file": str(f), "rule": "SC002",
-                         "stage": "llm", "ok": True, "ops": len(ops)})
-            else:
-                v["patch"] = "manual"
-                log_llm({"file": str(f), "rule": "SC002",
-                         "stage": "llm", "ok": False, "reason": reason})
-
-        # accumulate to global
-        extra_ops.extend(file_extra_ops)
-
-    # write report.md
-    report_path = pathlib.Path("report.md")
-    lines = ["# Migration Copilot Report", "", "**Violations Found**"]
-    if not all_violations:
-        lines += ["", "- None"]
-    else:
-        # Get live StorageClass info if using --live flag
-        live_info = None
-        if live:
-            from src.patch.generator import sc001_patch_ops
-            try:
-                _, chosen_sc, live_set = sc001_patch_ops("", use_live=True)
-                live_info = (chosen_sc, live_set)
-            except Exception:
-                pass  # fallback gracefully
-        lines += format_violations(all_violations, live_info)
-
-    report_path.write_text("\n".join(lines), encoding="utf-8")
-
-    # write patch.json: SC001 ops (deterministic) + SC002 ops (LLM if valid)
-    sc001_ops = build_patches([v for v in all_violations if v.get(
-        "patch") == "auto" and v["id"] == "SC001"], use_live=live)
-    combined_ops = sc001_ops + extra_ops
-
-    # dry-run against a synthetic YAML = concatenation of all files' texts
-    folder_text = ""
-    for f in files:
-        folder_text += f.read_text(encoding="utf-8") + "\n---\n"
-
-    ok, reason = dry_run_apply(folder_text, combined_ops)
-    log_llm({"file": "folder", "rule": "ALL", "stage": "dryrun",
-             "ok": ok, "reason": ("" if ok else reason)})
-    if not ok:
-        # drop LLM-generated adds (SC002) on failure; keep safe SC001 replaces
-        combined_ops = sc001_ops
-
-    pathlib.Path("patch.json").write_text(
-        json.dumps(combined_ops, indent=2), encoding="utf-8")
-
-    typer.echo(
-        f"Wrote {report_path} and patch.json ({len(all_violations)} violations across {len(files)} files).")
+    _process_files(files, live)
 
 
 @app.command("fix-tree")
-def fix_tree(dirpath: pathlib.Path):
+def fix_tree(dirpath: pathlib.Path, live: bool = typer.Option(False, "--live", help="Probe cluster for StorageClasses")):
     """
     Recursively read all *.yml|*.yaml under <dir>, aggregate violations,
     then write a single report.md + patch.json in CWD.
@@ -227,83 +174,7 @@ def fix_tree(dirpath: pathlib.Path):
     if not files:
         typer.echo("[WARN] no *.yml|*.yaml found")
         raise typer.Exit(code=0)
-
-    all_violations = []
-    for f in files:
-        try:
-            text = f.read_text(encoding="utf-8")
-        except Exception as e:
-            typer.echo(f"[WARN] skip {f}: {e}")
-            continue
-        vs = inspect_storageclass(text)
-        vs += inspect_requests_limits(text)
-        vs += inspect_ingress_class(text)
-        for v in vs:
-            vv = dict(v)
-            vv["file"] = str(f)
-            all_violations.append(vv)
-
-    # report.md
-    lines = ["# Migration Copilot Report", "", "**Violations Found**"]
-    if not all_violations:
-        lines += ["", "- None"]
-    else:
-        lines += format_violations(all_violations)
-
-    pathlib.Path("report.md").write_text("\n".join(lines), encoding="utf-8")
-
-    # patch.json
-    patch_ops = build_patches(all_violations)
-    pathlib.Path("patch.json").write_text(
-        json.dumps(patch_ops, indent=2), encoding="utf-8")
-
-    typer.echo(
-        f"Wrote report.md and patch.json ({len(all_violations)} violations across {len(files)} files).")
-
-
-@app.command("fix-per-file")
-def fix_per_file(dirpath: pathlib.Path):
-    """
-    For each *.yml|*.yaml in <dir> (non-recursive), write
-    report_<name>.md and patch_<name>.json next to the file.
-    """
-    if not dirpath.exists() or not dirpath.is_dir():
-        typer.echo(f"[ERR] not a directory: {dirpath}", err=True)
-        raise typer.Exit(code=1)
-
-    files = sorted([*dirpath.glob("*.yml"), *dirpath.glob("*.yaml")])
-    if not files:
-        typer.echo("[WARN] no *.yml|*.yaml found")
-        raise typer.Exit(code=0)
-
-    total_v = 0
-    for f in files:
-        text = f.read_text(encoding="utf-8")
-        violations = inspect_storageclass(text)
-        violations += inspect_requests_limits(text)
-        violations += inspect_ingress_class(text)
-        base = f.stem  # filename without extension
-        report_path = f.with_name(f"report_{base}.md")
-        patch_path = f.with_name(f"patch_{base}.json")
-
-        # report
-        lines = ["# Migration Copilot Report", "",
-                 f"**File:** {f.name}", "", "**Violations Found**"]
-        if not violations:
-            lines += ["", "- None"]
-        else:
-            lines += format_violations(violations)
-        report_path.write_text("\n".join(lines), encoding="utf-8")
-
-        # patch
-        patch_ops = build_patches(violations)
-        patch_path.write_text(json.dumps(
-            patch_ops, indent=2), encoding="utf-8")
-
-        total_v += len(violations)
-
-    typer.echo(
-        f"Wrote per-file reports/patches for {len(files)} files ({total_v} violations total).")
+    _process_files(files, live)
 
 
 @app.command()
