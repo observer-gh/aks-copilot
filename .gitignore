@@ -12,3 +12,8 @@ wheels/
 
 # logs
 logs/
+
+# outputs
+report.md
+patch.json
+azure_credentials.json
