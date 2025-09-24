@@ -12,7 +12,8 @@ RESET='\033[0m'
 DIR="examples/enemy"
 
 echo -e "${BOLD_CYAN}== 0) Clean old outputs ==${RESET}"
-rm -f report.md patch.json
+> report.md
+> patch.json
 mkdir -p logs
 : > logs/llm.jsonl
 echo -e "${GREEN}OK${RESET}"
