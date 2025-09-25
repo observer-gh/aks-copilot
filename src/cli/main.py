@@ -125,8 +125,18 @@ def _process_files(files: List[pathlib.Path], live: bool):
     pathlib.Path("patch.json").write_text(
         json.dumps(final_ops, indent=2), encoding="utf-8")
 
+    # FR3: resources.md generation (non-fatal)
+    try:
+        from src.resources.generator import infer_resources, write_resources_md
+        resources, signals = infer_resources(all_violations, file_texts)
+        write_resources_md(resources, signals, path="resources.md")
+        resources_note = f" + resources.md ({len(resources)} rows)"
+    except Exception as e:  # pragma: no cover (only triggers on unexpected failures)
+        typer.echo(f"[WARN] resources.md generation failed: {e}", err=True)
+        resources_note = ""
+
     typer.echo(
-        f"Wrote {report_path} and patch.json ({len(all_violations)} violations across {len(files)} files).")
+        f"Wrote {report_path} and patch.json{resources_note} ({len(all_violations)} violations across {len(files)} files).")
 
 
 @app.command()
