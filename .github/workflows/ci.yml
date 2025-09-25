@@ -76,6 +76,9 @@ jobs:
         with:
           creds: ${{ secrets.AZURE_CREDENTIALS }}
 
+      - name: ACR login
+        run: az acr login --name $ACR_NAME
+
       - name: Pull image (latest)
         run: docker pull $REGISTRY/$IMAGE_NAME:latest
 
