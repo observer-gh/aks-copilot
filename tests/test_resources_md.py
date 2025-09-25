@@ -89,6 +89,32 @@ spec:
     assert "Key Vault" in text
 
 
+def test_resources_signals_truncation(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    _prep(tmp_path)
+    # create >5 PVCs to exceed compact list limit
+    for i in range(7):
+        (tmp_path / f"pvc{i}.yml").write_text(f"""
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: data{i}
+spec:
+  accessModes: ["ReadWriteOnce"]
+  resources:
+    requests:
+      storage: 1Gi
+  storageClassName: local-path
+"""
+                                              )
+    # run tree so all files collected
+    text = _run_fix(tmp_path, list(tmp_path.glob("pvc*.yml")))
+    # expect '+N more' pattern
+    import re
+    assert re.search(
+        r"\+\d+ more", text), "Expected '+N more' pattern in output"
+
+
 def test_resources_empty_only_baseline(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     _prep(tmp_path)
@@ -118,3 +144,35 @@ spec:
     text = _run_fix(tmp_path, [ingress])
     assert "Ingress Controller" in text
     assert "Public IP" in text
+
+
+def test_resources_multidoc_aggregation(tmp_path, monkeypatch):
+    """Single file containing Ingress + PVC should trigger both ingress + storage related resources."""
+    monkeypatch.chdir(tmp_path)
+    _prep(tmp_path)
+    multi = tmp_path / "combo.yml"
+    multi.write_text(
+        """apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: demo
+spec:
+  rules: []
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: datax
+spec:
+  accessModes: ["ReadWriteOnce"]
+  resources:
+    requests:
+      storage: 1Gi
+  storageClassName: local-path
+"""
+    )
+    text = _run_fix(tmp_path, [multi])
+    assert "Ingress Controller" in text
+    assert "Public IP" in text
+    assert "Persistent Volume (Managed Disk / Azure Files)" in text
+    assert "Storage Class (Managed)" in text

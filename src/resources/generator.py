@@ -8,6 +8,8 @@ from dataclasses import dataclass
 from typing import List, Dict, Iterable, Tuple, Set
 import yaml
 import pathlib
+import os
+import json
 
 ORDER = [
     "resourceGroup",
@@ -53,6 +55,9 @@ def _safe_load_all(text: str) -> List[dict]:
         return []
 
 
+_PARSE_CACHE: Dict[str, List[dict]] = {}
+
+
 def _collect_signals(file_path: str, text: str) -> Dict[str, Set[str]]:
     """Return grouped signals extracted from a YAML file.
 
@@ -61,7 +66,11 @@ def _collect_signals(file_path: str, text: str) -> Dict[str, Set[str]]:
     Canonical token: file.yaml:Kind/Name (omit /Name if name missing).
     """
     out = {"ingress": set(), "pvc": set(), "images": set(), "secrets": set()}
-    docs = _safe_load_all(text)
+    if file_path in _PARSE_CACHE:
+        docs = _PARSE_CACHE[file_path]
+    else:
+        docs = _safe_load_all(text)
+        _PARSE_CACHE[file_path] = docs
     for doc in docs:
         kind = doc.get("kind")
         meta = doc.get("metadata") or {}
@@ -112,10 +121,12 @@ def infer_resources(violations: List[Dict], file_texts: Dict[str, str]) -> Tuple
     """Infer resources and return (resources, all_signal_tokens)."""
     # aggregate signals
     agg = {"ingress": set(), "pvc": set(), "images": set(), "secrets": set()}
+    raw_docs: Dict[str, List[dict]] = {}
     for fp, text in file_texts.items():
         local = _collect_signals(fp, text)
         for k, v in local.items():
             agg[k].update(v)
+        raw_docs[fp] = _PARSE_CACHE.get(fp, [])
 
     # violation based triggers
     has_sc001 = any(v.get("id") == "SC001" for v in violations)
@@ -166,6 +177,15 @@ def infer_resources(violations: List[Dict], file_texts: Dict[str, str]) -> Tuple
     resources.sort(key=lambda r: order_index.get(r.id, 999))
     all_signal_tokens = sorted(
         {*agg["ingress"], *agg["pvc"], *agg["images"], *agg["secrets"]})
+    # Optional debug artifact
+    if os.environ.get("RESOURCES_DEBUG") == "1":
+        debug = {
+            "resources": [r.__dict__ for r in resources],
+            "signals": all_signal_tokens,
+            "raw": raw_docs
+        }
+        pathlib.Path("resources.debug.json").write_text(
+            json.dumps(debug, indent=2), encoding="utf-8")
     return resources, all_signal_tokens
 
 
