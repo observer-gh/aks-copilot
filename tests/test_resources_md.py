@@ -128,6 +128,18 @@ def test_resources_empty_only_baseline(tmp_path, monkeypatch):
     assert "Container Registry (ACR)" not in text
 
 
+def test_infer_resources_direct_with_sc001_violation():
+    from src.resources.generator import infer_resources
+    # fabricate SC001 violation, empty manifests
+    violations = [{"id": "SC001"}]
+    resources, signals = infer_resources(violations, {})
+    names = [r.name for r in resources]
+    # Expect baseline + storage class absent because no pvc signal, only SC001 should still create storage class row? our logic currently requires has_sc001 to add storageClass even without pvc signals; ensure that contract stays.
+    assert "Storage Class (Managed)" in names
+    # No PVC signal so persistent volume should not appear
+    assert not any(n.startswith("Persistent Volume") for n in names)
+
+
 def test_resources_ingress(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     _prep(tmp_path)

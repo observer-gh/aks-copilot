@@ -139,8 +139,18 @@ def _process_files(files: List[pathlib.Path], live: bool):
 
     _generate_patch(all_violations, extra_ops, file_texts, live)
 
+    # FR3 resources.md generation (non-fatal)
+    resources_note = ""
+    try:
+        from src.resources.generator import infer_resources, write_resources_md
+        resources, signals = infer_resources(all_violations, file_texts)
+        write_resources_md(resources, signals, path="resources.md")
+        resources_note = f" + resources.md ({len(resources)} rows)"
+    except Exception as e:  # pragma: no cover
+        typer.echo(f"[WARN] resources.md generation failed: {e}", err=True)
+
     typer.echo(
-        f"Wrote report.md and patch.json ({len(all_violations)} violations across {len(files)} files).")
+        f"Wrote report.md and patch.json{resources_note} ({len(all_violations)} violations across {len(files)} files).")
 
 
 @app.command()
