@@ -20,6 +20,65 @@ from src.patch.generator import build_patches
 app = typer.Typer(help="k3s→AKS Copilot (MVP)")
 
 
+def _run_inspections(text: str) -> list:
+    """Run all inspections on a single file's content."""
+    violations = inspect_storageclass(text)
+    violations += inspect_requests_limits(text)
+    violations += inspect_ingress_class(text)
+    return violations
+
+
+def _generate_report(all_violations: list, live: bool):
+    """Generate the report.md file."""
+    report_path = pathlib.Path("report.md")
+    lines = ["# Migration Copilot Report", "", "**Violations Found**"]
+    if not all_violations:
+        lines += ["", "- None"]
+    else:
+        live_info = None
+        if live:
+            from src.patch.generator import sc001_patch_ops
+            try:
+                _, chosen_sc, live_set = sc001_patch_ops("", use_live=True)
+                live_info = (chosen_sc, live_set)
+            except Exception:
+                pass
+        lines += format_violations(all_violations, live_info)
+    report_path.write_text("\n".join(lines), encoding="utf-8")
+
+
+def _generate_patch(all_violations: list, extra_ops: list, file_texts: dict, live: bool):
+    """Generate the patch.json file."""
+    sc001_ops = build_patches([v for v in all_violations if v.get(
+        "patch") == "auto" and v["id"] == "SC001"], use_live=live)
+
+    combined_ops = sc001_ops + extra_ops
+
+    # Per-file dry-run
+    final_ops = []
+    for op in combined_ops:
+        filepath_str = op.get("file")
+        if not filepath_str:
+            continue
+
+        text = file_texts.get(filepath_str)
+        if not text:
+            continue
+
+        # The file path is needed for the dry run, but not in the final patch.json
+        op_copy = op.copy()
+        del op_copy["file"]
+
+        ok, reason = dry_run_apply(text, [op_copy])
+        log_llm({"file": filepath_str, "rule": "ALL", "stage": "dryrun",
+                 "ok": ok, "reason": ("" if ok else reason)})
+        if ok:
+            final_ops.append(op_copy)
+
+    pathlib.Path("patch.json").write_text(
+        json.dumps(final_ops, indent=2), encoding="utf-8")
+
+
 def _process_files(files: List[pathlib.Path], live: bool):
     """Shared logic for file processing, validation, and patch generation."""
     all_violations = []
@@ -38,9 +97,7 @@ def _process_files(files: List[pathlib.Path], live: bool):
             typer.echo(f"[WARN] skip {f}: {e}", err=True)
             continue
 
-        vs = inspect_storageclass(text)
-        vs += inspect_requests_limits(text)
-        vs += inspect_ingress_class(text)
+        vs = _run_inspections(text)
 
         for v in vs:
             v = dict(v)
@@ -78,65 +135,12 @@ def _process_files(files: List[pathlib.Path], live: bool):
             log_llm({"file": filepath_str, "rule": "SC002",
                      "stage": "llm", "ok": False, "reason": reason})
 
-    # Report generation
-    report_path = pathlib.Path("report.md")
-    lines = ["# Migration Copilot Report", "", "**Violations Found**"]
-    if not all_violations:
-        lines += ["", "- None"]
-    else:
-        live_info = None
-        if live:
-            from src.patch.generator import sc001_patch_ops
-            try:
-                _, chosen_sc, live_set = sc001_patch_ops("", use_live=True)
-                live_info = (chosen_sc, live_set)
-            except Exception:
-                pass
-        lines += format_violations(all_violations, live_info)
-    report_path.write_text("\n".join(lines), encoding="utf-8")
+    _generate_report(all_violations, live)
 
-    # Patch generation
-    sc001_ops = build_patches([v for v in all_violations if v.get(
-        "patch") == "auto" and v["id"] == "SC001"], use_live=live)
-
-    combined_ops = sc001_ops + extra_ops
-
-    # Per-file dry-run
-    final_ops = []
-    for op in combined_ops:
-        filepath_str = op.get("file")
-        if not filepath_str:
-            continue
-
-        text = file_texts.get(filepath_str)
-        if not text:
-            continue
-
-        # The file path is needed for the dry run, but not in the final patch.json
-        op_copy = op.copy()
-        del op_copy["file"]
-
-        ok, reason = dry_run_apply(text, [op_copy])
-        log_llm({"file": filepath_str, "rule": "ALL", "stage": "dryrun",
-                 "ok": ok, "reason": ("" if ok else reason)})
-        if ok:
-            final_ops.append(op_copy)
-
-    pathlib.Path("patch.json").write_text(
-        json.dumps(final_ops, indent=2), encoding="utf-8")
-
-    # FR3: resources.md generation (non-fatal)
-    try:
-        from src.resources.generator import infer_resources, write_resources_md
-        resources, signals = infer_resources(all_violations, file_texts)
-        write_resources_md(resources, signals, path="resources.md")
-        resources_note = f" + resources.md ({len(resources)} rows)"
-    except Exception as e:  # pragma: no cover (only triggers on unexpected failures)
-        typer.echo(f"[WARN] resources.md generation failed: {e}", err=True)
-        resources_note = ""
+    _generate_patch(all_violations, extra_ops, file_texts, live)
 
     typer.echo(
-        f"Wrote {report_path} and patch.json{resources_note} ({len(all_violations)} violations across {len(files)} files).")
+        f"Wrote report.md and patch.json ({len(all_violations)} violations across {len(files)} files).")
 
 
 @app.command()
@@ -197,9 +201,7 @@ def validate(filepath: pathlib.Path):
         raise typer.Exit(code=1)
 
     text = filepath.read_text(encoding="utf-8")
-    violations = inspect_storageclass(text)
-    violations += inspect_requests_limits(text)
-    violations += inspect_ingress_class(text)
+    violations = _run_inspections(text)
 
     if not violations:
         typer.echo("No violations.")
