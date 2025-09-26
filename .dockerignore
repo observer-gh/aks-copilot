@@ -1,0 +1,28 @@
+# Git
+.git
+.gitignore
+
+# Python virtual environment
+.venv
+venv/
+*.venv
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Test artifacts
+.pytest_cache/
+tests/
+spec/
+
+# Documentation
+docs/
+README.md
+report.md
+
+# Local development files
+.vscode/
+*.log

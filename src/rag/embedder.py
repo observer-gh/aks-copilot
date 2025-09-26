@@ -1,38 +1,54 @@
 import json
-import http.client
+import os
 from typing import List
+import numpy as np
+import requests
 from src.config import get_config
 
 
 def _ollama_embed(texts: List[str], model: str) -> List[List[float]]:
-    conn = http.client.HTTPConnection("localhost", 11434, timeout=30)
-    body = json.dumps({"model": model, "input": texts})
-    conn.request("POST", "/api/embed", body,
-                 {"Content-Type": "application/json"})
-    r = conn.getresponse()
-    if r.status != 200:
-        raise RuntimeError(f"Ollama embeddings HTTP {r.status}")
-    data = json.loads(r.read())
-    # supports both single and batched responses
-    vecs = data.get("embeddings") or [data.get("embedding")]
-    if not vecs or not vecs[0]:
-        raise RuntimeError("empty embeddings from ollama")
-    return vecs
+    """
+    Embeds a list of texts using a running Ollama instance.
+    """
+    base_url = os.environ.get("OLLAMA_BASE_URL", "http://localhost:11434")
+    url = f"{base_url}/api/embeddings"
+
+    results = []
+    # Ollama's /api/embeddings endpoint processes one prompt at a time.
+    for text in texts:
+        payload = {"model": model, "prompt": text}
+        try:
+            response = requests.post(url, json=payload, timeout=30)
+            response.raise_for_status()
+            data = response.json()
+            if "embedding" in data:
+                results.append(data["embedding"])
+        except requests.exceptions.RequestException as e:
+            print(
+                f"[ERROR] Ollama embed request failed for text '{text[:50]}...': {e}")
+            # On failure, we can't generate a meaningful embedding.
+            # Returning an empty list will cause the search to find no results.
+            return []
+    return results
 
 
 def _stub_embed(texts: List[str]) -> List[List[float]]:
-    # deterministic tiny hash → 16-dim toy vector (placeholder)
-    out = []
-    for t in texts:
-        v = [((sum(bytearray(t.encode())) + i*17) % 97)/97.0 for i in range(16)]
-        out.append(v)
-    return out
+    # consistent, but meaningless, embeddings
+    return [[hash(txt) / 1e10, (hash(txt) >> 32) / 1e10] for txt in texts]
 
 
-def embed_texts(texts: List[str]) -> List[List[float]]:
+def embed_texts(texts: List[str]) -> np.ndarray:
+    """
+    Embed a list of texts using the configured provider.
+    Returns a numpy array of embeddings.
+    """
     cfg = get_config()
     provider = cfg.get("embedder", "stub")
     if provider == "ollama":
         model = cfg.get("embedder_model", "nomic-embed-text")
-        return _ollama_embed(texts, model)
-    return _stub_embed(texts)
+        embeddings = _ollama_embed(texts, model)
+        if embeddings:
+            return np.array(embeddings, dtype="float32")
+
+    # Fallback to stub if provider is not ollama or if embedding fails
+    return np.array(_stub_embed(texts), dtype="float32")
